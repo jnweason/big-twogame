@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/icons/icon-192.png">
+<link rel="manifest" href="manifest.json">   <!-- 改這裡 -->
+<link rel="apple-touch-icon" href="icons/icon-192.png">   <!-- 改這裡 -->
 <title>大老二 – 職業賭場版 (Mobile)</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -912,7 +912,7 @@ function aiThink() {
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js')
+      navigator.serviceWorker.register('sw.js')   // 去掉前導 /
         .then(reg => console.log('SW registered: ', reg))
         .catch(err => console.log('SW registration failed: ', err));
     });
@@ -921,6 +921,7 @@ function aiThink() {
 </body>
 
 </html>
+
 
 
 
