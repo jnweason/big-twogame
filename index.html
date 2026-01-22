@@ -283,9 +283,6 @@
             <span class="bar-label" style="margin-left:2px;">張</span>
         </div>
     </div>
-<div id="fullscreen-toggle" style="position:fixed; top:10px; right:10px; z-index:9999; background:rgba(0,0,0,0.6); padding:8px 15px; border-radius:8px; color:#fff; font-size:1rem; cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,0.5);">
-  全螢幕
-</div>
     <div id="modal-overlay">
         <div class="modal-box" id="start-screen">
             <h2 style="color:#ffd700; margin-bottom:15px;">CASINO BIG TWO</h2>
@@ -914,6 +911,25 @@ document.addEventListener('fullscreenchange', () => {
   }
 });
 </script>
+    <!-- 放在 </body> 結束標籤前，最後一個 <script> 之前（這樣它會浮在最上層） -->
+<div id="fullscreen-toggle" style="
+    position: fixed;
+    top: 15px;
+    right: 15px;
+    z-index: 99999; /* 超高層級，確保不會被蓋住 */
+    background: rgba(0,0,0,0.7);
+    color: #fff;
+    padding: 10px 18px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 0 15px rgba(255,235,59,0.5);
+    pointer-events: auto; /* 強制允許點擊 */
+    border: 2px solid #ffeb3b;
+">
+    全螢幕
+</div>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -926,5 +942,6 @@ document.addEventListener('fullscreenchange', () => {
 </body>
 
 </html>
+
 
 
