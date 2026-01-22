@@ -1,0 +1,22 @@
+{
+  "name": "大老二 – 職業賭場版",
+  "short_name": "大老二",
+  "description": "職業賭場風格的大老二撲克遊戲",
+  "start_url": "/index.html",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#000000",
+  "theme_color": "#2e7d32",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
