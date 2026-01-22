@@ -353,7 +353,6 @@ let isRoundActive = false;
 let isFirstTurnOfGame = true;
 let gameStake = 100;
 let isGameRunning = false;
-let lastSuccessfulPlayer = 0;   // 新增：最後成功出牌的玩家（用來重開新輪）
 
 /* ================= 初始化 ================= */
 function initPlayers() {
@@ -664,46 +663,29 @@ function executePlay(pIdx, cards, handInfo) {
 
     if(handInfo.type !== 'single') showPop(pIdx, handInfo.type.toUpperCase());
 
-// 新增/修改這幾行
-    lastPlay = { count: cards.length, score: info.score, type: info.type };
+    lastPlay = { pIdx, type: handInfo.type, score: handInfo.score, count: cards.length };
     isRoundActive = true;
-    passCount = 0;                      // 重設 PASS 計數
-    lastSuccessfulPlayer = pIdx;        // 記錄最後出牌者
-
-    // 更新 UI...
-    updateBtnState();
+    passCount = 0; 
+    if(isFirstTurnOfGame) isFirstTurnOfGame = false;
 
     renderAllHands();
     updateInfoUI(); 
     nextTurn();
-    
-    // 檢查是否結束遊戲
-    if (players[pIdx].hand.length === 0) {
-        // 贏家邏輯...
-    }
-    nextTurn(); // 假設你有這個函數輪到下家，或直接下面邏輯
 }
 
 function executePass(pIdx) {
-    showPop(pIdx, 'PASS', '#ff5252');
-
-    passCount++;  // PASS 次數 +1
-
-    if (passCount === 3) {  // 其他 3 人全 PASS → 新輪由最後出牌者開始
-        passCount = 0;
-        isRoundActive = false;
-        currentTurn = lastSuccessfulPlayer;
-        showMsg('所有人 PASS，新的一輪由玩家 ' + (lastSuccessfulPlayer + 1) + ' 開始');
-    } else {
-        currentTurn = (currentTurn + 1) % 4;  // 正常輪到下家
+    showPop(pIdx, "PASS", '#bdbdbd');
+    passCount++;
+    if(passCount >= 3) {
+        setTimeout(() => {
+            isRoundActive = false;
+            lastPlay = null;
+            document.getElementById('center-play').innerHTML = '';
+            showMsg("自由出牌");
+            updateBtnState();
+        }, 800);
     }
-
-    updateBtnState();
-
-    // 如果輪到 AI，延遲思考
-    if (currentTurn !== 0) {
-        setTimeout(aiThink, 800);
-    }
+    nextTurn();
 }
 
 function validatePlayMatch(cards) {
@@ -841,8 +823,9 @@ function showPop(pIdx, text, color='#ffeb3b') {
     gsap.to(div, {opacity:0, duration:0.5, delay: 0.8, onComplete:()=>div.remove()});
 }
 
-/* ================= 加強版 AI（保留五張 + 聰明管牌） ================= */
+/* ================= 加強版 AI ================= */
 function getCombinations(arr, k) {
+    // 產生所有 C(n,k) 組合（用來找五張牌型）
     const result = [];
     function helper(start, current) {
         if (current.length === k) {
@@ -862,39 +845,41 @@ function getCombinations(arr, k) {
 function aiThink() {
     const ai = players[currentTurn];
     let hand = [...ai.hand];
-    hand.sort((a, b) => a.val - b.val);
+    hand.sort((a, b) => a.val - b.val); // 排序
 
     let possiblePlays = [];
 
-    // 單張
+    // 單張（所有）
     hand.forEach(card => {
         const info = getHandType([card]);
         if (info) possiblePlays.push({ cards: [card], info, size: 1 });
     });
 
-    // 對子
+    // 對子（找所有同 rank）
     for (let i = 0; i < hand.length - 1; i++) {
         if (hand[i].rank === hand[i + 1].rank) {
             const cards = [hand[i], hand[i + 1]];
             const info = getHandType(cards);
             if (info) possiblePlays.push({ cards, info, size: 2 });
-            i++;
+            i++; // 跳過
         }
     }
 
-    // 五張（窮舉所有合法）
+    // 五張：窮舉所有組合，找到合法牌型
     if (hand.length >= 5) {
         const combos = getCombinations(hand, 5);
         combos.forEach(combo => {
-            const sorted = [...combo].sort((a, b) => a.val - b.val);
-            const info = getHandType(sorted);
+            // 每組組合再排序一次（確保 getHandType 正確判斷）
+            const sortedCombo = [...combo].sort((a, b) => a.val - b.val);
+            const info = getHandType(sortedCombo);
             if (info) possiblePlays.push({ cards: combo, info, size: 5 });
         });
     }
 
-    // 過濾能出的牌型
+    // 決定能出的牌型
     let validPlays = possiblePlays;
     if (isRoundActive && lastPlay) {
+        // 必須同張數、同牌型、分數更大
         validPlays = possiblePlays.filter(play =>
             play.size === lastPlay.count &&
             play.info.type === lastPlay.type &&
@@ -903,46 +888,25 @@ function aiThink() {
     }
 
     // 首輪強制含 3♣
-    if (isFirstTurnOfGame && validPlays.length > 0) {
+    if (isFirstTurnOfGame) {
         validPlays = validPlays.filter(play =>
-            play.cards.some(c => c.rank === 3 && c.suit === 0)  // 假設 suit 0 = 梅花
+            play.cards.some(c => c.rank === 3 && c.suit === 0) // 假設 suit 0 是梅花
         );
     }
 
-    if (validPlays.length === 0) {
-        executePass(currentTurn);
-        return;
-    }
+    if (validPlays.length > 0) {
+        // 出最小的（保留大牌）
+        validPlays.sort((a, b) => a.info.score - b.info.score);
+        const best = validPlays[0];
 
-    let best;
-    if (!isRoundActive) {
-        // 自由出牌：優先出最小的「非五張」牌型（保留五張炸彈）
-        const nonFive = validPlays.filter(p => p.size !== 5);
-        if (nonFive.length > 0) {
-            nonFive.sort((a, b) => a.info.score - b.info.score);
-            best = nonFive[0];
-        } else {
-            // 只能出五張時，出最小的五張（清牌）
-            validPlays.sort((a, b) => a.info.score - b.info.score);
-            best = validPlays[0];
-        }
+        // 用原物件出牌
+        const toPlay = best.cards.map(c =>
+            ai.hand.find(card => card.val === c.val && card.suit === c.suit && card.rank === c.rank)
+        );
+        executePlay(currentTurn, toPlay, best.info);
     } else {
-        // 管牌時：如果有五張能管，優先出「最大的五張」（炸彈壓制）
-        const five = validPlays.filter(p => p.size === 5);
-        if (five.length > 0) {
-            five.sort((a, b) => b.info.score - a.info.score);  // 最大先
-            best = five[0];
-        } else {
-            validPlays.sort((a, b) => a.info.score - b.info.score);
-            best = validPlays[0];
-        }
+        executePass(currentTurn);
     }
-
-    // 用原物件出牌
-    const toPlay = best.cards.map(c =>
-        ai.hand.find(card => card.val === c.val && card.suit === c.suit && card.rank === c.rank)
-    );
-    executePlay(currentTurn, toPlay, best.info);
 }
 </script>
 <script>
@@ -957,6 +921,9 @@ function aiThink() {
 </body>
 
 </html>
+
+
+
 
 
 
