@@ -861,6 +861,23 @@ function aiThink() {
     else executePass(currentTurn);
 }
 </script>
+    <script>
+document.getElementById('fullscreen-toggle').addEventListener('click', () => {
+  const elem = document.documentElement;
+  if (elem.requestFullscreen) {
+    elem.requestFullscreen();
+  } else if (elem.webkitRequestFullscreen) { // iOS Safari
+    elem.webkitRequestFullscreen();
+  }
+});
+
+// 退出全螢幕時可選（按手機返回鍵會自動退出）
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement) {
+    // 可隱藏按鈕或其他
+  }
+});
+</script>
 <script>
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -873,3 +890,4 @@ function aiThink() {
 </body>
 
 </html>
+
