@@ -79,9 +79,6 @@
         padding: 0 20px;
         box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
         font-size: 0.9rem;
-        <div id="fullscreen-toggle" style="position:absolute; top:10px; right:10px; z-index:999; background:rgba(0,0,0,0.5); padding:5px 10px; border-radius:5px; color:#fff; font-size:0.8rem;">
-  全螢幕
-</div>
     }
     .bar-section { display: flex; align-items: center; gap: 15px; }
     .bar-label { color: #888; font-size: 0.8rem; margin-right: 5px; }
@@ -286,7 +283,9 @@
             <span class="bar-label" style="margin-left:2px;">張</span>
         </div>
     </div>
-
+<div id="fullscreen-toggle" style="position:fixed; top:10px; right:10px; z-index:9999; background:rgba(0,0,0,0.6); padding:8px 15px; border-radius:8px; color:#fff; font-size:1rem; cursor:pointer; box-shadow:0 0 10px rgba(0,0,0,0.5);">
+  全螢幕
+</div>
     <div id="modal-overlay">
         <div class="modal-box" id="start-screen">
             <h2 style="color:#ffd700; margin-bottom:15px;">CASINO BIG TWO</h2>
@@ -830,35 +829,72 @@ function showPop(pIdx, text, color='#ffeb3b') {
 /* ================= 簡易 AI ================= */
 function aiThink() {
     const ai = players[currentTurn];
-    const hand = ai.hand;
-    let bestPlay = null;
+    let hand = [...ai.hand]; // 複製一份，避免改到原手牌
+    hand.sort((a, b) => a.val - b.val); // 按點數小到大排序
 
-    // 極簡邏輯：有得打就打最小的
-    if(!isRoundActive) {
-        bestPlay = { cards: [hand[0]], info: getHandType([hand[0]]) };
-        if(isFirstTurnOfGame) {
-             const c3 = hand.find(c => c.val === 30);
-             bestPlay = { cards: [c3], info: getHandType([c3]) }; 
-        }
-    } else {
-        if(lastPlay.count === 1) {
-            const c = hand.find(c => c.val > lastPlay.score);
-            if(c) bestPlay = { cards: [c], info: getHandType([c]) };
-        } else if(lastPlay.count === 2) {
-             for(let i=0; i<hand.length-1; i++) {
-                if(hand[i].rank === hand[i+1].rank) {
-                    const info = getHandType([hand[i], hand[i+1]]);
-                    if(info.score > lastPlay.score) {
-                        bestPlay = { cards: [hand[i], hand[i+1]], info };
-                        break;
-                    }
-                }
-            }
+    let possiblePlays = [];
+
+    // 產生所有可能的合法牌型（單張、對子、五張組合）
+    // 單張
+    for (let i = 0; i < hand.length; i++) {
+        const cards = [hand[i]];
+        const info = getHandType(cards);
+        if (info) possiblePlays.push({ cards, info, size: cards.length });
+    }
+
+    // 對子
+    for (let i = 0; i < hand.length - 1; i++) {
+        if (hand[i].rank === hand[i + 1].rank) {
+            const cards = [hand[i], hand[i + 1]];
+            const info = getHandType(cards);
+            if (info) possiblePlays.push({ cards, info, size: cards.length });
+            i++; // 跳過下一張相同的
         }
     }
 
-    if(bestPlay) executePlay(currentTurn, bestPlay.cards, bestPlay.info);
-    else executePass(currentTurn);
+    // 五張（所有組合，太暴力會慢，所以只檢查有潛力的）
+    if (hand.length >= 5) {
+        // 簡單窮舉前幾種常見五張（實際可優化，但手機夠快）
+        for (let i = 0; i <= hand.length - 5; i++) {
+            const combo = hand.slice(i, i + 5);
+            const info = getHandType(combo);
+            if (info) possiblePlays.push({ cards: combo, info, size: 5 });
+        }
+    }
+
+    // 過濾出「能出的牌型」
+    let validPlays = [];
+    if (!isRoundActive || !lastPlay) {
+        // 自由出牌（或首輪）
+        validPlays = possiblePlays;
+        if (isFirstTurnOfGame) {
+            // 強制包含 3♣
+            validPlays = validPlays.filter(play => 
+                play.cards.some(c => c.rank === 3 && c.suit === 0)
+            );
+        }
+    } else {
+        // 必須管上：張數相同，且牌型合法且更大
+        validPlays = possiblePlays.filter(play => 
+            play.size === lastPlay.count &&
+            (play.size === 5 ? play.info.score > lastPlay.score :
+             play.info.type === lastPlay.type && play.info.score > lastPlay.score)
+        );
+    }
+
+    if (validPlays.length > 0) {
+        // 選擇「最小的」能出的牌型（保留大牌）
+        validPlays.sort((a, b) => a.info.score - b.info.score);
+        const best = validPlays[0];
+        // 從原手牌移除（要用原物件）
+        const toPlay = best.cards.map(c => 
+            ai.hand.find(card => card.val === c.val && card.suit === c.suit)
+        );
+        executePlay(currentTurn, toPlay, best.info);
+    } else {
+        // 管不上 → PASS
+        executePass(currentTurn);
+    }
 }
 </script>
     <script>
@@ -890,4 +926,5 @@ document.addEventListener('fullscreenchange', () => {
 </body>
 
 </html>
+
 
