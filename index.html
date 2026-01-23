@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<link rel="manifest" href="manifest.json">   <!-- 改這裡 -->
-<link rel="apple-touch-icon" href="icons/icon-192.png">   <!-- 改這裡 -->
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 <title>大老二 – 職業賭場版 (Mobile)</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700;900&display=swap" rel="stylesheet">
@@ -245,7 +245,30 @@
         color: #fff; border-radius: 8px; cursor: pointer;
     }
     .stake-btn.selected { background: #ffd700; color: #000; border-color: #fff; }
-
+    
+    /* MODIFIED: 新增交換局按鈕樣式 */
+    .mode-btn {
+        padding: 10px 20px; margin: 10px 5px; background: #37474f; 
+        border: 1px solid #546e7a; color: #fff; border-radius: 8px; 
+        cursor: pointer; font-weight: 500;
+    }
+    .mode-btn.selected { background: #ffd700; color: #000; border-color: #fff; }
+    
+    /* MODIFIED: 新增交換局UI樣式 */
+    #exchange-ui {
+        position: absolute; bottom: calc(var(--human-card-h) + var(--btm-bar-height) + 80px);
+        left: 50%; transform: translateX(-50%);
+        display: none; flex-direction: column; align-items: center; gap: 10px;
+        z-index: 400; pointer-events: auto;
+        width: 100%;
+    }
+    #exchange-btn {
+        padding: 10px 30px; background: #4caf50; border: none; 
+        border-radius: 50px; color: white; font-weight: bold;
+        cursor: pointer; box-shadow: 0 4px 0 rgba(0,0,0,0.3);
+    }
+    #exchange-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 rgba(0,0,0,0.3); }
+    
     /* 浮動訊息 */
     .msg-pop {
         position: absolute; font-size: 2rem; font-weight: 900;
@@ -287,6 +310,11 @@
         <div class="modal-box" id="start-screen">
             <h2 style="color:#ffd700; margin-bottom:15px;">CASINO BIG TWO</h2>
             <p style="color:#ccc; font-size:0.9rem; margin-bottom:20px;">選擇底注</p>
+            <!-- MODIFIED: 新增一般局和交換局按鈕 -->
+            <div style="margin-bottom:15px;">
+                <button id="mode-normal" class="mode-btn selected" onclick="selectGameMode('normal')">一般局</button>
+                <button id="mode-exchange" class="mode-btn" onclick="selectGameMode('exchange')">交換局</button>
+            </div>
             <div>
                 <button class="stake-btn" onclick="startGame(50)">$50</button>
                 <button class="stake-btn selected" onclick="startGame(100)">$100</button>
@@ -308,18 +336,25 @@
         <div class="hand" id="hand-0"></div>
     </div>
     
+    <!-- MODIFIED: 新增交換局按鈕區域 -->
+    <div id="exchange-ui">
+        <button id="exchange-btn" onclick="performExchange()">交換</button>
+    </div>
+    
     <div id="controls-area">
         <div class="btn-group-main">
             <button id="btn-pass" class="action-btn btn-pass" onclick="humanPass()">PASS</button>
             <button id="btn-play" class="action-btn btn-play" onclick="humanPlay()">出牌</button>
         </div>
-        <div class="smart-group">
-            <button id="smart-pair" class="smart-btn" onclick="autoSelect('pair')">對子</button>
-            <button id="smart-straight" class="smart-btn" onclick="autoSelect('straight')">順子</button>
-            <button id="smart-fullhouse" class="smart-btn" onclick="autoSelect('fullhouse')">葫蘆</button>
-            <button id="smart-fourkind" class="smart-btn" onclick="autoSelect('fourkind')">鐵支</button>
-            <button class="smart-btn" onclick="clearSelection()">重選</button>
-        </div>
+<div class="smart-group">
+    <button id="smart-pair" class="smart-btn" onclick="autoSelect('pair')">對子</button>
+    <button id="smart-straight" class="smart-btn" onclick="autoSelect('straight')">順子</button>
+    <button id="smart-fullhouse" class="smart-btn" onclick="autoSelect('fullhouse')">葫蘆</button>
+    <button id="smart-fourkind" class="smart-btn" onclick="autoSelect('fourkind')">鐵支</button>
+    <!-- 新增同花順按鈕 -->
+    <button id="smart-straightflush" class="smart-btn" onclick="autoSelect('straightflush')">同花順</button>
+    <button class="smart-btn" onclick="clearSelection()">重選</button>
+</div>
     </div>
 
     <div id="player-1" class="player ai">
@@ -353,6 +388,14 @@ let isRoundActive = false;
 let isFirstTurnOfGame = true;
 let gameStake = 100;
 let isGameRunning = false;
+// MODIFIED: 新增遊戲模式變量
+let gameMode = 'normal'; 
+let exchangeCards = []; // 用於存儲交換的牌
+
+// MODIFIED: 新增步步高規則相關變量
+let roundPassed = {}; // 記錄每輪誰已經PASS過
+let currentRoundMaxPlayer = 0; // 記錄當前輪次中出最大牌的玩家
+let consecutivePassCount = 0; // 記錄連續PASS數
 
 /* ================= 初始化 ================= */
 function initPlayers() {
@@ -366,11 +409,190 @@ function initPlayers() {
     updateInfoUI();
 }
 
+// MODIFIED: 添加遊戲模式選擇功能
+function selectGameMode(mode) {
+    gameMode = mode;
+    // 更新按鈕樣式
+    document.getElementById('mode-normal').classList.toggle('selected', mode === 'normal');
+    document.getElementById('mode-exchange').classList.toggle('selected', mode === 'exchange');
+}
+
 function startGame(stake) {
     gameStake = stake;
     document.getElementById('modal-overlay').style.display = 'none';
     initPlayers();
-    startNewRound();
+    
+    // MODIFIED: 根據遊戲模式啟動不同流程
+    if (gameMode === 'exchange') {
+        startExchangeRound();
+    } else {
+        startNewRound();
+    }
+}
+
+// MODIFIED: 新增交換局流程
+function startExchangeRound() {
+    let deck = createDeck();
+    shuffle(deck);
+
+    players.forEach(p => { p.hand = []; p.lastSearchIndex = 0; });
+    document.getElementById('center-play').innerHTML = '';
+
+    // 發牌
+    for(let i=0; i<13; i++) {
+        for(let p=0; p<4; p++) {
+            players[p].hand.push(deck.pop());
+        }
+    }
+    players.forEach(p => sortHand(p.hand));
+
+    isRoundActive = false;
+    isFirstTurnOfGame = true;
+    lastPlay = null;
+    passCount = 0;
+
+    // 渲染手牌，但隱藏按鈕
+    renderAllHands();
+    updateInfoUI();
+    
+    // 顯示交換按鈕
+    document.getElementById('exchange-ui').style.display = 'flex';
+    
+    // 顯示提示
+    showMsg("選擇0-3張牌準備交換", 3000);
+}
+
+// MODIFIED: 執行交換邏輯
+function performExchange() {
+    // 收集玩家選擇的交換牌
+    exchangeCards = [];
+    for (let i = 0; i < 4; i++) {
+        const player = players[i];
+        let selectedCards = [];
+        
+        // 人類玩家
+        if (i === 0) {
+            const selectedEls = document.querySelectorAll('#hand-0 .selected');
+            selectedCards = Array.from(selectedEls).map(el => player.hand[parseInt(el.dataset.idx)]);
+        } 
+        // AI玩家
+        else {
+            // 隨機選擇0-3張牌
+            const numToExchange = Math.floor(Math.random() * 4);
+            const shuffledHand = [...player.hand];
+            shuffle(shuffledHand);
+            selectedCards = shuffledHand.slice(0, numToExchange);
+        }
+        
+        // 記錄交換的牌
+        exchangeCards.push({
+            playerId: i,
+            cards: selectedCards
+        });
+    }
+    
+    // 檢查玩家是否選擇了正確數量的牌 (0-3)
+    const humanCards = exchangeCards[0].cards;
+    if (humanCards.length > 3) {
+        showMsg("請選擇0-3張牌", 2000);
+        return;
+    }
+    
+    // 開始交換動畫
+    exchangeAnimation();
+}
+
+// MODIFIED: 交換牌動畫
+function exchangeAnimation() {
+    document.getElementById('exchange-ui').style.display = 'none';
+    showMsg("交換牌中...", 2000);
+    
+    // 1. 將交換的牌放到中央區域
+    const center = document.getElementById('center-play');
+    center.innerHTML = '';
+    
+    let allExchangeCards = [];
+    exchangeCards.forEach(exchange => {
+        allExchangeCards = allExchangeCards.concat(exchange.cards);
+    });
+    
+ // 2. 顯示所有交換的牌（背面）
+allExchangeCards.forEach((card, i) => {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.style.zIndex = i;
+    div.style.transform = `translate(${Math.random()*100 - 50}px, ${Math.random()*100 - 50}px)`;
+    // MODIFIED: 交換牌時顯示背面，而不是正面
+    div.innerHTML = `<img src="${BACK_IMG}">`;
+    center.appendChild(div);
+});
+    
+    // 3. 動畫效果：牌飛向中心
+    gsap.to('#center-play .card', {
+        x: 0, y: 0, scale: 0.8,
+        duration: 0.8, stagger: 0.05, ease: "power2.out",
+        onComplete: () => {
+            // 4. 洗牌動畫
+            gsap.to('#center-play .card', {
+                rotation: 360, duration: 1.5, 
+                ease: "power1.inOut", repeat: 3,
+                onComplete: () => {
+                    // 5. 重新分發牌
+                    shuffle(allExchangeCards);
+                    
+                    let startIndex = 0;
+                    for (let i = 0; i < 4; i++) {
+                        const numCards = exchangeCards[i].cards.length;
+                        if (numCards > 0) {
+                            const playerCards = allExchangeCards.slice(startIndex, startIndex + numCards);
+                            startIndex += numCards;
+                            
+                            // 從玩家手牌中移除交換的牌
+                            players[i].hand = players[i].hand.filter(card => 
+                                !exchangeCards[i].cards.some(exCard => exCard.val === card.val)
+                            );
+                            
+                            // 添加新的牌
+                            players[i].hand = players[i].hand.concat(playerCards);
+                            sortHand(players[i].hand);
+                        }
+                    }
+                    
+                    // 6. 渲染更新後的手牌
+                    renderAllHands();
+                    updateInfoUI();
+                    
+                    // 7. 開始正常遊戲流程
+                    setTimeout(() => {
+                        startNewRoundWithExchange();
+                    }, 800);
+                }
+            });
+        }
+    });
+}
+
+// MODIFIED: 帶交換的正常遊戲流程
+function startNewRoundWithExchange() {
+    if(players.some(p => p.chips <= 0)) {
+        gameOver();
+        return;
+    }
+
+    isGameRunning = true;
+    
+    isRoundActive = false;
+    isFirstTurnOfGame = true;
+    lastPlay = null;
+    passCount = 0;
+
+    renderAllHands();
+    updateInfoUI();
+
+    if(checkDragon()) return; 
+
+    determineFirstPlayer();
+    checkTurn();
 }
 
 function startNewRound() {
@@ -393,11 +615,9 @@ function startNewRound() {
     }
     players.forEach(p => sortHand(p.hand));
 
-    isRoundActive = false;
-    isFirstTurnOfGame = true;
-    lastPlay = null;
-    passCount = 0;
-
+    // 重置步步高規則相關狀態
+    resetRoundState();
+    
     renderAllHands();
     updateInfoUI();
 
@@ -405,6 +625,39 @@ function startNewRound() {
 
     determineFirstPlayer();
     checkTurn();
+}
+
+function startNewRoundWithExchange() {
+    if(players.some(p => p.chips <= 0)) {
+        gameOver();
+        return;
+    }
+
+    isGameRunning = true;
+    
+    // 重置步步高規則相關狀態
+    resetRoundState();
+    
+    renderAllHands();
+    updateInfoUI();
+
+    if(checkDragon()) return; 
+
+    determineFirstPlayer();
+    checkTurn();
+}
+
+// 新增函數：重置輪次狀態
+function resetRoundState() {
+    isRoundActive = false;
+    isFirstTurnOfGame = true;
+    lastPlay = null;
+    passCount = 0;
+    
+    // 重置步步高規則相關變量
+    roundPassed = {};
+    currentRoundMaxPlayer = 0;
+    consecutivePassCount = 0;
 }
 
 function createDeck() {
@@ -472,9 +725,20 @@ function checkTurn() {
     if(players[currentTurn].isHuman) {
         showMsg(isRoundActive ? "輪到你了" : "自由出牌");
         players[0].lastSearchIndex = 0;
-        checkSmartHints();
+        // MODIFIED: 修復智慧選牌提示
+        if(!isRoundActive && !isFirstTurnOfGame) {
+            // 自由出牌階段，顯示所有可用牌型
+            ['pair', 'straight', 'fullhouse', 'fourkind'].forEach(type => {
+                const candidates = findCandidates(type);
+                if(candidates.length > 0) {
+                    document.getElementById(`smart-${type}`).classList.add('active-hint');
+                }
+            });
+        } else {
+            checkSmartHints();
+        }
     } else {
-        setTimeout(aiThink, 1000);
+        setTimeout(aiThink, 1500);
     }
 }
 
@@ -483,7 +747,34 @@ function nextTurn() {
         handleRoundEnd(currentTurn, false);
         return; 
     }
-    currentTurn = (currentTurn + 1) % 4; 
+    
+    // 找到下一個可以出牌的玩家
+    let nextPlayer = (currentTurn + 1) % 4;
+    let iterations = 0;
+    
+    // 最多檢查4個玩家
+    while (iterations < 4) {
+        // 如果下一位玩家已經PASS，跳過
+        if (roundPassed[nextPlayer]) {
+            nextPlayer = (nextPlayer + 1) % 4;
+            iterations++;
+            continue;
+        }
+        
+        // 如果已經檢查完所有玩家，回到起始玩家
+        if (nextPlayer === currentTurn) {
+            break;
+        }
+        
+        // 找到可以出牌的玩家
+        currentTurn = nextPlayer;
+        checkTurn();
+        return;
+    }
+    
+    // 修改：移除原 if (consecutivePassCount >= 3) 區塊，因為已移到 executePass()
+    // 如果沒有其他玩家可以出牌，直接到下一個（但現在由 executePass 處理重置）
+    currentTurn = (currentTurn + 1) % 4;
     checkTurn();
 }
 
@@ -494,27 +785,78 @@ function handleRoundEnd(winnerIdx, isSpecialWin) {
     if(!isSpecialWin) confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 } });
 
     let totalWin = 0;
+    let multiplier = 1;
+    let specialText = "";
+    
+    // 檢查特殊牌型
+    if(lastPlay) {
+        // 檢查是否包含2（非單張）
+        if(lastPlay.count > 1) {
+            const hasTwo = lastPlay.cards.some(card => card.rank === 2);
+            if(hasTwo) {
+                multiplier = 2;
+                specialText = "大老二";
+            }
+        }
+        
+        // 檢查是否為鐵支
+        if(lastPlay.type === 'fourkind') {
+            multiplier = 2;
+            specialText = "鐵支";
+        }
+        
+        // 檢查是否為同花順（排除A-2-3-4-5）
+        if(lastPlay.type === 'straightflush') {
+            // 檢查是否為A-2-3-4-5
+            const ranks = lastPlay.cards.map(c => c.rank);
+            const isA2345 = (ranks[0] === 14 && ranks[1] === 2 && ranks[2] === 3 && ranks[3] === 4 && ranks[4] === 5);
+            if(!isA2345) {
+                multiplier = 2;
+                specialText = "柳丁";
+            }
+        }
+    }
+
     players.forEach(p => {
         if(p.id !== winnerIdx) {
             let count = p.hand.length;
-            let cost = count * gameStake;
+            let cost = count * gameStake * multiplier; // 應用倍數
             if(count > 10 || isSpecialWin) cost *= 2;    
             
             p.chips -= cost;
             totalWin += cost;
-            showPop(p.id, `-$${cost}`, '#ff5252');
+            
+            // 顯示特殊文字效果
+            let msg = `-$${cost}`;
+            if(multiplier > 1) {
+                msg += ` (${specialText})`;
+                // 添加特殊文字效果
+                showPop(p.id, `${specialText}!`, '#ffeb3b');
+            }
+            showPop(p.id, msg, '#ff5252');
         }
     });
 
     players[winnerIdx].chips += totalWin;
-    showPop(winnerIdx, `+$${totalWin}`, '#4caf50');
+    // 顯示特殊文字效果
+    let winMsg = `+$${totalWin}`;
+    if(multiplier > 1) {
+        winMsg += ` (${specialText})`;
+    }
+    showPop(winnerIdx, winMsg, '#4caf50');
     
     updateInfoUI();
 
     if(players.some(p => p.chips <= 0)) {
         setTimeout(gameOver, 2500);
     } else {
-        setTimeout(startNewRound, 3000);
+        setTimeout(() => {
+            if (gameMode === 'exchange') {
+                startExchangeRound();
+            } else {
+                startNewRound();
+            }
+        }, 3000);
     }
 }
 
@@ -574,12 +916,38 @@ function findCandidates(targetType) {
             for(let k=0; k<4; k++) if(sub[k+1].rank - sub[k].rank !== 1) isSeq = false;
             if(isSeq) candidates.push(sub);
         }
+    }else if (targetType === 'straightflush') {
+        // 找同花順
+        const suits = {};
+        hand.forEach(c => {
+            if(!suits[c.suit]) suits[c.suit] = [];
+            suits[c.suit].push(c);
+        });
+        
+        // 檢查每個花色是否有同花順
+        for(const suit in suits) {
+            const sameSuitCards = suits[suit].sort((a,b) => a.rank - b.rank);
+            if(sameSuitCards.length < 5) continue;
+            
+            for(let i=0; i <= sameSuitCards.length-5; i++) {
+                const sub = sameSuitCards.slice(i, i+5);
+                let isSeq = true;
+                for(let k=0; k<4; k++) if(sub[k+1].rank - sub[k].rank !== 1) isSeq = false;
+                
+                // 排除A-2-3-4-5 (最小順子)
+                const isA2345 = (sub[0].rank === 14 && sub[1].rank === 2 && sub[2].rank === 3 && sub[3].rank === 4 && sub[4].rank === 5);
+                if(isSeq && !isA2345) {
+                    candidates.push(sub);
+                }
+            }
+        }
     }
     return candidates;
 }
 
 function checkSmartHints() {
-    ['pair', 'straight', 'fullhouse', 'fourkind'].forEach(type => {
+    // 新增 'straightflush' 檢查
+    ['pair', 'straight', 'fullhouse', 'fourkind', 'straightflush'].forEach(type => {
         const candidates = findCandidates(type);
         if(candidates.length === 0) return; 
 
@@ -655,11 +1023,11 @@ function executePlay(pIdx, cards, handInfo) {
         const div = document.createElement('div');
         div.className = 'card';
         div.style.zIndex = i;
-        div.innerHTML = `<img src="${c.img}">`;
+        // 遊戲過程中顯示正面給所有人看（包括其他玩家的出牌）
+        const imgSrc = c.img;
+        div.innerHTML = `<img src="${imgSrc}">`;
         center.appendChild(div);
     });
-    
-    gsap.from('#center-play .card', {scale: 1.5, opacity:0, stagger:0.05, ease: "back.out(1.7)"});
 
     if(handInfo.type !== 'single') showPop(pIdx, handInfo.type.toUpperCase());
 
@@ -667,6 +1035,10 @@ function executePlay(pIdx, cards, handInfo) {
     isRoundActive = true;
     passCount = 0; 
     if(isFirstTurnOfGame) isFirstTurnOfGame = false;
+
+    // MODIFIED: 步步高規則 - 重置連續PASS數並更新最大出牌玩家
+    consecutivePassCount = 0;
+    currentRoundMaxPlayer = pIdx; // 記錄當前最大出牌玩家
 
     renderAllHands();
     updateInfoUI(); 
@@ -676,16 +1048,40 @@ function executePlay(pIdx, cards, handInfo) {
 function executePass(pIdx) {
     showPop(pIdx, "PASS", '#bdbdbd');
     passCount++;
-    if(passCount >= 3) {
+    
+    // 記錄該玩家在本輪已PASS
+    roundPassed[pIdx] = true;
+    
+    // 增加連續PASS數
+    consecutivePassCount++;
+    
+    // 修改：檢查PASS人數是否達3（即其他三人都PASS）
+    const passedCount = Object.keys(roundPassed).length;
+    if (passedCount >= 3) {  // 4玩家中3個PASS，剩餘一個是最大
         setTimeout(() => {
+            // MODIFIED: 關鍵修復 - 正確重置遊戲狀態
             isRoundActive = false;
+            isFirstTurnOfGame = false; // 不是首輪，但可以自由出牌
             lastPlay = null;
             document.getElementById('center-play').innerHTML = '';
-            showMsg("自由出牌");
+            showMsg(`玩家 ${currentRoundMaxPlayer} 取得自由出牌權`);
+            
+            // 設置下一個輪次從最大出牌玩家開始
+            currentTurn = currentRoundMaxPlayer;
+            
+            // 重置PASS狀態
+            roundPassed = {};
+            consecutivePassCount = 0;
+            
+            // 重新渲染並更新UI
+            renderAllHands();
             updateBtnState();
+            checkTurn();
         }, 800);
+    } else {
+        // 否則繼續輪到下一位玩家
+        nextTurn();
     }
-    nextTurn();
 }
 
 function validatePlayMatch(cards) {
@@ -702,14 +1098,37 @@ function validatePlay(cards) {
     const handInfo = getHandType(cards);
     if(!handInfo) return { valid: false, msg: "牌型錯誤" };
 
+    // MODIFIED: 處理首輪必須出3♣的規則
     if(isFirstTurnOfGame) {
         if(!cards.some(c => c.rank === 3 && c.suit === 0)) return { valid: false, msg: "需包含 3♣" };
     }
 
+    // MODIFIED: 關鍵修復 - 如果不是isRoundActive，表示可以自由出牌
+    if(!isRoundActive && !isFirstTurnOfGame) {
+        return { valid: true, handInfo };
+    }
+
     if(isRoundActive && lastPlay) {
-        if(cards.length !== lastPlay.count) return { valid: false, msg: "張數不符" };
+        // 修改：加鐵支例外，允許5張鐵支壓任何張數
+        if(cards.length !== lastPlay.count && !(cards.length === 5 && handInfo.type === 'fourkind')) return { valid: false, msg: "張數不符" };
+        
         if(cards.length === 5) {
-            if(handInfo.score > lastPlay.score) return { valid: true, handInfo };
+            // 特別處理：鐵支可以贏過任何5張牌型（已存在）
+            if (handInfo.type === 'fourkind' && lastPlay.type !== 'fourkind') {
+                return { valid: true, handInfo };
+            }
+            // 修改：如果張數不同但是鐵支，直接允許（壓<5張）
+            else if (handInfo.type === 'fourkind' && cards.length !== lastPlay.count) {
+                return { valid: true, handInfo };
+            }
+            // 同牌型比較分數
+            else if (handInfo.type === lastPlay.type && handInfo.score > lastPlay.score) {
+                return { valid: true, handInfo };
+            }
+            // 其他情況需要分數更高
+            else if (handInfo.score > lastPlay.score) {
+                return { valid: true, handInfo };
+            }
             return { valid: false, msg: "牌不夠大" };
         } else {
             if(handInfo.type !== lastPlay.type) return { valid: false, msg: "牌型不符" };
@@ -741,15 +1160,45 @@ function getHandType(cards) {
         let straightScore = 0;
         const r = cards.map(c=>c.rank);
         
-        // 簡易順子判斷
-        if(r[4]-r[0] === 4 && new Set(r).size===5) { isStraight = true; straightScore=200+cards[4].val; }
-        // 3-4-5-A-2 or 3-4-5-6-2 etc (略化處理)
-        if(!isStraight && r[0]===3 && r[1]===4 && r[2]===5) { isStraight=true; straightScore=100; }
-
+        // MODIFIED: 修改順子判斷邏輯
+        // 檢查A-2-3-4-5 (最小順子)
+        if (r[0] === 14 && r[1] === 2 && r[2] === 3 && r[3] === 4 && r[4] === 5) {
+            isStraight = true;
+            // 使用特殊分數表示A-2-3-4-5順子，低於3-4-5-6-7
+            straightScore = 100 + r[0] * 10 + r[0]; // 100 + 14*10 + 14 = 254
+        }
+        // 檢查2-3-4-5-6 (最大順子)
+        else if (r[0] === 2 && r[1] === 3 && r[2] === 4 && r[3] === 5 && r[4] === 6) {
+            isStraight = true;
+            // 使用特殊分數表示2-3-4-5-6順子，高於A-2-3-4-5
+            straightScore = 190 + r[4] * 10 + r[4]; // 190 + 6*10 + 6 = 256
+        }
+        // 檢查一般順子
+        else if (r[4] - r[0] === 4 && new Set(r).size === 5) {
+            isStraight = true;
+            straightScore = 200 + r[4] * 10 + r[4];
+        }
+        
+        // 檢查是否為同花順
         if(isStraight && isFlush) return { type: 'straightflush', score: 40000 + straightScore };
-        if(vals.includes(4)) return { type: 'fourkind', score: 30000 + parseInt(Object.keys(counts).find(k=>counts[k]===4))*10 };
-        if(vals.includes(3) && vals.includes(2)) return { type: 'fullhouse', score: 20000 + parseInt(Object.keys(counts).find(k=>counts[k]===3))*10 };
-        if(isStraight) return { type: 'straight', score: 10000 + straightScore };
+        
+        // MODIFIED: 鐵支可以贏過單張、葫蘆、順子
+        // 鐵支評分設置得很高，高於同花順和葫蘆
+        if(vals.includes(4)) {
+            const fourOfAKindRank = parseInt(Object.keys(counts).find(k => counts[k] === 4));
+            return { type: 'fourkind', score: 45000 + fourOfAKindRank * 10 };
+        }
+        
+        // 葫蘆
+        if(vals.includes(3) && vals.includes(2)) {
+            const threeRank = parseInt(Object.keys(counts).find(k => counts[k] === 3));
+            return { type: 'fullhouse', score: 20000 + threeRank * 10 };
+        }
+        
+        // 順子
+        if(isStraight) {
+            return { type: 'straight', score: 10000 + straightScore };
+        }
     }
     return null;
 }
@@ -762,6 +1211,13 @@ function renderAllHands() {
         p.hand.forEach((card, idx) => {
             const el = document.createElement('div');
             el.className = 'card';
+            
+            // MODIFIED: 添加灰色遮罩表示該輪無法出牌
+            if (roundPassed[p.id] && !p.isHuman) {
+                el.style.filter = 'grayscale(100%) brightness(0.7)';
+                el.style.opacity = '0.5';
+            }
+            
             // 只有自己顯示牌面，其他顯示背面
             const imgSrc = p.isHuman ? card.img : BACK_IMG;
             el.innerHTML = `<img src="${imgSrc}">`;
@@ -801,10 +1257,10 @@ function updateBtnState() {
     passBtn.disabled = (isFirstTurnOfGame || !isRoundActive); 
 }
 
-function showMsg(txt) {
+function showMsg(txt, duration = 2000) {
     const box = document.getElementById('info-box');
     box.textContent = txt; box.style.display = 'block';
-    setTimeout(() => box.style.display = 'none', 2000);
+    setTimeout(() => box.style.display = 'none', duration);
 }
 
 function showPop(pIdx, text, color='#ffeb3b') {
@@ -842,17 +1298,55 @@ function getCombinations(arr, k) {
     return result;
 }
 
+// MODIFIED: 新增AI策略函數
+function evaluateCardValue(card, playedCardsHistory) {
+    // 根據歷史出牌評估卡片價值
+    const historyCount = playedCardsHistory.filter(c => c.rank === card.rank).length;
+    // 已經出現過的牌越多，價值越低
+    return card.rank - historyCount;
+}
+
+function shouldBreakCombination(ai, hand, playedCardsHistory) {
+    // 判斷是否應該拆掉組合出單張或兩張
+    const groups = {};
+    hand.forEach(c => { 
+        if(!groups[c.rank]) groups[c.rank]=[];
+        groups[c.rank].push(c); 
+    });
+    
+    // 計算有多少組合
+    const combinations = Object.values(groups).filter(g => g.length >= 3);
+    if(combinations.length < 5) return false; // 手牌組合不多就不拆
+    
+    // 計算大牌比例
+    const highCards = hand.filter(c => c.rank >= 13); // K, A, 2
+    return highCards.length > hand.length * 0.4; // 大牌超過40%考慮拆牌
+}
+
 function aiThink() {
     const ai = players[currentTurn];
     let hand = [...ai.hand];
     hand.sort((a, b) => a.val - b.val); // 排序
 
     let possiblePlays = [];
+    let playedCardsHistory = []; // 記錄歷史出牌
+
+    // MODIFIED: 收集歷史出牌
+    if(lastPlay && lastPlay.pIdx !== undefined) {
+        // 這裡簡化處理，實際應用中應該維護完整的歷史記錄
+        playedCardsHistory = players[lastPlay.pIdx].hand.filter(c => 
+            !hand.some(h => h.val === c.val)
+        );
+    }
 
     // 單張（所有）
     hand.forEach(card => {
         const info = getHandType([card]);
-        if (info) possiblePlays.push({ cards: [card], info, size: 1 });
+        if (info) {
+            // MODIFIED: 考慮歷史出牌評估卡片價值
+            const value = evaluateCardValue(card, playedCardsHistory);
+            possiblePlays.push({ cards: [card], info, size: 1, value });
+        }
     });
 
     // 對子（找所有同 rank）
@@ -860,7 +1354,11 @@ function aiThink() {
         if (hand[i].rank === hand[i + 1].rank) {
             const cards = [hand[i], hand[i + 1]];
             const info = getHandType(cards);
-            if (info) possiblePlays.push({ cards, info, size: 2 });
+            if (info) {
+                const value = evaluateCardValue(hand[i], playedCardsHistory) + 
+                              evaluateCardValue(hand[i+1], playedCardsHistory);
+                possiblePlays.push({ cards, info, size: 2, value });
+            }
             i++; // 跳過
         }
     }
@@ -872,18 +1370,23 @@ function aiThink() {
             // 每組組合再排序一次（確保 getHandType 正確判斷）
             const sortedCombo = [...combo].sort((a, b) => a.val - b.val);
             const info = getHandType(sortedCombo);
-            if (info) possiblePlays.push({ cards: combo, info, size: 5 });
+            if (info) {
+                const value = combo.reduce((sum, card) => 
+                    sum + evaluateCardValue(card, playedCardsHistory), 0);
+                possiblePlays.push({ cards: combo, info, size: 5, value });
+            }
         });
     }
 
-    // 決定能出的牌型
+// 決定能出的牌型
     let validPlays = possiblePlays;
     if (isRoundActive && lastPlay) {
-        // 必須同張數、同牌型、分數更大
+        // 修改：必須同張數、同牌型、分數更大，或是鐵支例外
         validPlays = possiblePlays.filter(play =>
-            play.size === lastPlay.count &&
+            (play.size === lastPlay.count &&
             play.info.type === lastPlay.type &&
-            play.info.score > lastPlay.score
+            play.info.score > lastPlay.score) ||
+            (play.size === 5 && play.info.type === 'fourkind')  // 鐵支可壓任何
         );
     }
 
@@ -895,16 +1398,51 @@ function aiThink() {
     }
 
     if (validPlays.length > 0) {
-        // 出最小的（保留大牌）
-        validPlays.sort((a, b) => a.info.score - b.info.score);
-        const best = validPlays[0];
+        // MODIFIED: 更智能的出牌策略
+        let bestPlay;
+        
+        // 如果是自由出牌階段，優先考慮保留大牌組合
+        if (!isRoundActive) {
+            // 檢查是否應該拆掉組合
+            if (shouldBreakCombination(ai, hand, playedCardsHistory)) {
+                // 選擇價值較低的單張或對子
+                const smallPlays = validPlays.filter(p => p.size <= 2);
+                if (smallPlays.length > 0) {
+                    smallPlays.sort((a, b) => a.value - b.value);
+                    bestPlay = smallPlays[0];
+                }
+            }
+            
+            // 默認策略：出最小的（保留大牌）
+            if (!bestPlay) {
+                validPlays.sort((a, b) => a.info.score - b.info.score);
+                bestPlay = validPlays[0];
+            }
+        } else {
+            // 壓牌階段：出最小的合法牌
+            validPlays.sort((a, b) => a.info.score - b.info.score);
+            bestPlay = validPlays[0];
+        }
+
+        // 特殊情況：如果有7且不是必須壓牌，考慮PASS
+        if (isRoundActive && !isFirstTurnOfGame) {
+            const hasSeven = hand.some(c => c.rank === 7);
+            const isPlayingSeven = bestPlay.cards.some(c => c.rank === 7);
+            
+            // 如果有7但不是最佳選擇，有一定機率PASS
+            if (hasSeven && !isPlayingSeven && Math.random() < 0.3) {
+                executePass(currentTurn);
+                return;
+            }
+        }
 
         // 用原物件出牌
-        const toPlay = best.cards.map(c =>
+        const toPlay = bestPlay.cards.map(c =>
             ai.hand.find(card => card.val === c.val && card.suit === c.suit && card.rank === c.rank)
         );
-        executePlay(currentTurn, toPlay, best.info);
+        executePlay(currentTurn, toPlay, bestPlay.info);
     } else {
+        // 沒有合法牌可出，PASS
         executePass(currentTurn);
     }
 }
@@ -921,6 +1459,7 @@ function aiThink() {
 </body>
 
 </html>
+
 
 
 
