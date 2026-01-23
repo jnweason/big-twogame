@@ -435,6 +435,9 @@ function startExchangeRound() {
     let deck = createDeck();
     shuffle(deck);
 
+    // 必須先重置狀態，清除上一局的 PASS 紀錄
+    resetRoundState();
+
     players.forEach(p => { p.hand = []; p.lastSearchIndex = 0; });
     document.getElementById('center-play').innerHTML = '';
 
@@ -446,19 +449,16 @@ function startExchangeRound() {
     }
     players.forEach(p => sortHand(p.hand));
 
-    isRoundActive = false;
-    isFirstTurnOfGame = true;
-    lastPlay = null;
-    passCount = 0;
-
-    // 渲染手牌，但隱藏按鈕
+    // 雖然 resetRoundState 已重置，但交換局在交換前不應視為回合開始
+    isRoundActive = false; 
+    
+    // 渲染手牌
     renderAllHands();
     updateInfoUI();
     
     // 顯示交換按鈕
     document.getElementById('exchange-ui').style.display = 'flex';
     
-    // 顯示提示
     showMsg("選擇0-3張牌準備交換", 3000);
 }
 
@@ -581,11 +581,9 @@ function startNewRoundWithExchange() {
 
     isGameRunning = true;
     
-    isRoundActive = false;
-    isFirstTurnOfGame = true;
-    lastPlay = null;
-    passCount = 0;
-
+    // 重置步步高規則相關狀態
+    resetRoundState();
+    
     renderAllHands();
     updateInfoUI();
 
@@ -780,9 +778,19 @@ function nextTurn() {
 
 /* ================= 結算 ================= */
 function handleRoundEnd(winnerIdx, isSpecialWin) {
-    isGameRunning = false;
-    showMsg(`贏家: ${players[winnerIdx].isHuman?'你':`AI ${winnerIdx}`}`);
-    if(!isSpecialWin) confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 } });
+    isGameRunning = false; // 鎖定遊戲狀態，防止 AI 繼續運算
+    
+    const winnerName = players[winnerIdx].isHuman ? '你' : `AI ${winnerIdx}`;
+    showMsg(`贏家: ${winnerName}`);
+    
+    // 安全執行 confetti，防止 CDN 失敗導致遊戲卡死
+    if(!isSpecialWin && typeof confetti === 'function') {
+        try {
+            confetti({ particleCount: 200, spread: 120, origin: { y: 0.6 } });
+        } catch(e) {
+            console.log("Confetti error:", e);
+        }
+    }
 
     let totalWin = 0;
     let multiplier = 1;
@@ -790,67 +798,48 @@ function handleRoundEnd(winnerIdx, isSpecialWin) {
     
     // 檢查特殊牌型
     if(lastPlay) {
-        // 檢查是否包含2（非單張）
         if(lastPlay.count > 1) {
             const hasTwo = lastPlay.cards.some(card => card.rank === 2);
-            if(hasTwo) {
-                multiplier = 2;
-                specialText = "大老二";
-            }
+            if(hasTwo) { multiplier = 2; specialText = "大老二"; }
         }
-        
-        // 檢查是否為鐵支
-        if(lastPlay.type === 'fourkind') {
-            multiplier = 2;
-            specialText = "鐵支";
-        }
-        
-        // 檢查是否為同花順（排除A-2-3-4-5）
+        if(lastPlay.type === 'fourkind') { multiplier = 2; specialText = "鐵支"; }
         if(lastPlay.type === 'straightflush') {
-            // 檢查是否為A-2-3-4-5
             const ranks = lastPlay.cards.map(c => c.rank);
             const isA2345 = (ranks[0] === 14 && ranks[1] === 2 && ranks[2] === 3 && ranks[3] === 4 && ranks[4] === 5);
-            if(!isA2345) {
-                multiplier = 2;
-                specialText = "柳丁";
-            }
+            if(!isA2345) { multiplier = 2; specialText = "柳丁"; }
         }
     }
 
     players.forEach(p => {
         if(p.id !== winnerIdx) {
             let count = p.hand.length;
-            let cost = count * gameStake * multiplier; // 應用倍數
+            let cost = count * gameStake * multiplier; 
             if(count > 10 || isSpecialWin) cost *= 2;    
             
             p.chips -= cost;
             totalWin += cost;
             
-            // 顯示特殊文字效果
             let msg = `-$${cost}`;
-            if(multiplier > 1) {
-                msg += ` (${specialText})`;
-                // 添加特殊文字效果
-                showPop(p.id, `${specialText}!`, '#ffeb3b');
-            }
+            if(multiplier > 1) msg += ` (${specialText})`;
             showPop(p.id, msg, '#ff5252');
         }
     });
 
     players[winnerIdx].chips += totalWin;
-    // 顯示特殊文字效果
     let winMsg = `+$${totalWin}`;
-    if(multiplier > 1) {
-        winMsg += ` (${specialText})`;
-    }
+    if(multiplier > 1) winMsg += ` (${specialText})`;
     showPop(winnerIdx, winMsg, '#4caf50');
     
     updateInfoUI();
 
+    // 延遲後進入下一局或結束
     if(players.some(p => p.chips <= 0)) {
         setTimeout(gameOver, 2500);
     } else {
         setTimeout(() => {
+            // 確保下一局開始前清理桌面
+            document.getElementById('center-play').innerHTML = '';
+            
             if (gameMode === 'exchange') {
                 startExchangeRound();
             } else {
@@ -1324,32 +1313,34 @@ function shouldBreakCombination(ai, hand, playedCardsHistory) {
 }
 
 function aiThink() {
+    // 安全檢查：如果遊戲已經結束（有人贏了），AI 就不應該再思考或出牌
+    if (!isGameRunning) return;
+
     const ai = players[currentTurn];
     let hand = [...ai.hand];
-    hand.sort((a, b) => a.val - b.val); // 排序
+    hand.sort((a, b) => a.val - b.val); 
 
     let possiblePlays = [];
-    let playedCardsHistory = []; // 記錄歷史出牌
+    let playedCardsHistory = []; 
 
-    // MODIFIED: 收集歷史出牌
     if(lastPlay && lastPlay.pIdx !== undefined) {
-        // 這裡簡化處理，實際應用中應該維護完整的歷史記錄
         playedCardsHistory = players[lastPlay.pIdx].hand.filter(c => 
             !hand.some(h => h.val === c.val)
         );
     }
 
-    // 單張（所有）
+    // ... (aiThink 其餘代碼保持不變，直到結尾) ...
+    // 請保留原有的思考邏輯，只需在最上方加入 !isGameRunning 的判斷即可
+    
     hand.forEach(card => {
         const info = getHandType([card]);
         if (info) {
-            // MODIFIED: 考慮歷史出牌評估卡片價值
             const value = evaluateCardValue(card, playedCardsHistory);
             possiblePlays.push({ cards: [card], info, size: 1, value });
         }
     });
 
-    // 對子（找所有同 rank）
+    // 對子
     for (let i = 0; i < hand.length - 1; i++) {
         if (hand[i].rank === hand[i + 1].rank) {
             const cards = [hand[i], hand[i + 1]];
@@ -1359,15 +1350,14 @@ function aiThink() {
                               evaluateCardValue(hand[i+1], playedCardsHistory);
                 possiblePlays.push({ cards, info, size: 2, value });
             }
-            i++; // 跳過
+            i++; 
         }
     }
 
-    // 五張：窮舉所有組合，找到合法牌型
+    // 五張
     if (hand.length >= 5) {
         const combos = getCombinations(hand, 5);
         combos.forEach(combo => {
-            // 每組組合再排序一次（確保 getHandType 正確判斷）
             const sortedCombo = [...combo].sort((a, b) => a.val - b.val);
             const info = getHandType(sortedCombo);
             if (info) {
@@ -1378,71 +1368,56 @@ function aiThink() {
         });
     }
 
-// 決定能出的牌型
     let validPlays = possiblePlays;
     if (isRoundActive && lastPlay) {
-        // 修改：必須同張數、同牌型、分數更大，或是鐵支例外
         validPlays = possiblePlays.filter(play =>
             (play.size === lastPlay.count &&
             play.info.type === lastPlay.type &&
             play.info.score > lastPlay.score) ||
-            (play.size === 5 && play.info.type === 'fourkind')  // 鐵支可壓任何
+            (play.size === 5 && play.info.type === 'fourkind') 
         );
     }
 
-    // 首輪強制含 3♣
     if (isFirstTurnOfGame) {
         validPlays = validPlays.filter(play =>
-            play.cards.some(c => c.rank === 3 && c.suit === 0) // 假設 suit 0 是梅花
+            play.cards.some(c => c.rank === 3 && c.suit === 0) 
         );
     }
 
     if (validPlays.length > 0) {
-        // MODIFIED: 更智能的出牌策略
         let bestPlay;
         
-        // 如果是自由出牌階段，優先考慮保留大牌組合
         if (!isRoundActive) {
-            // 檢查是否應該拆掉組合
             if (shouldBreakCombination(ai, hand, playedCardsHistory)) {
-                // 選擇價值較低的單張或對子
                 const smallPlays = validPlays.filter(p => p.size <= 2);
                 if (smallPlays.length > 0) {
                     smallPlays.sort((a, b) => a.value - b.value);
                     bestPlay = smallPlays[0];
                 }
             }
-            
-            // 默認策略：出最小的（保留大牌）
             if (!bestPlay) {
                 validPlays.sort((a, b) => a.info.score - b.info.score);
                 bestPlay = validPlays[0];
             }
         } else {
-            // 壓牌階段：出最小的合法牌
             validPlays.sort((a, b) => a.info.score - b.info.score);
             bestPlay = validPlays[0];
         }
 
-        // 特殊情況：如果有7且不是必須壓牌，考慮PASS
         if (isRoundActive && !isFirstTurnOfGame) {
             const hasSeven = hand.some(c => c.rank === 7);
             const isPlayingSeven = bestPlay.cards.some(c => c.rank === 7);
-            
-            // 如果有7但不是最佳選擇，有一定機率PASS
             if (hasSeven && !isPlayingSeven && Math.random() < 0.3) {
                 executePass(currentTurn);
                 return;
             }
         }
 
-        // 用原物件出牌
         const toPlay = bestPlay.cards.map(c =>
             ai.hand.find(card => card.val === c.val && card.suit === c.suit && card.rank === c.rank)
         );
         executePlay(currentTurn, toPlay, bestPlay.info);
     } else {
-        // 沒有合法牌可出，PASS
         executePass(currentTurn);
     }
 }
@@ -1455,6 +1430,7 @@ function aiThink() {
         .catch(err => console.log('SW registration failed: ', err));
     });
   }
+  
 </script>
 </body>
 
