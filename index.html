@@ -1774,24 +1774,94 @@ function aiThink() {
   }
   
   // ================= 自動代打 =================
-  function autoPlay() {
+function autoPlay() {
+      // 切換自動代打狀態
+      autoPlayEnabled = !autoPlayEnabled;
+      const btn = document.querySelector('.auto-play-btn');
+      if(autoPlayEnabled) {
+          btn.style.background = '#4caf50';
+          btn.textContent = '停止代打';
+          showMsg("自動代打已開啟");
+          if(currentTurn === 0 && isGameRunning) {
+              setTimeout(doAutoPlay, 500);
+          }
+      } else {
+          btn.style.background = '#e91e63';
+          btn.textContent = '自動代打';
+          showMsg("自動代打已關閉");
+      }
+  }
+
+  function doAutoPlay() {
+      if(!autoPlayEnabled) return;
       if(currentTurn !== 0 || !isGameRunning) return;
-      
+
       const hand = players[0].hand;
-      
-      // 如果只剩一張，強制出最大
+
       if(hand.length === 1) {
+          clearSelection();
           selectCard(0);
           humanPlay();
           return;
       }
-      
-      // 嘗試找到最小可壓的牌
+
+      // 檢查是否只剩一種牌型
+      const handTypes = ['single', 'pair', 'straight', 'fullhouse', 'fourkind', 'straightflush'];
+      let availableTypes = [];
+
+      handTypes.forEach(type => {
+          if(type === 'single') {
+              availableTypes.push('single');
+          } else if(type === 'pair' && hand.length >= 2) {
+              const pairs = findCandidates('pair');
+              if(pairs.length > 0) availableTypes.push('pair');
+          } else if(type === 'straight' && hand.length >= 5) {
+              const straights = findCandidates('straight');
+              if(straights.length > 0) availableTypes.push('straight');
+          } else if(type === 'fullhouse' && hand.length >= 5) {
+              const fullhouses = findCandidates('fullhouse');
+              if(fullhouses.length > 0) availableTypes.push('fullhouse');
+          } else if(type === 'fourkind' && hand.length >= 5) {
+              const fourkinds = findCandidates('fourkind');
+              if(fourkinds.length > 0) availableTypes.push('fourkind');
+          } else if(type === 'straightflush' && hand.length >= 5) {
+              const sfs = findCandidates('straightflush');
+              if(sfs.length > 0) availableTypes.push('straightflush');
+          }
+      });
+
+      // 如果只剩一種牌型，強制出這種牌型
+      if(availableTypes.length === 1) {
+          const type = availableTypes[0];
+          if(type === 'single') {
+              let maxCard = hand[0];
+              for(let i = 1; i < hand.length; i++) {
+                  if(hand[i].val > maxCard.val) maxCard = hand[i];
+              }
+              clearSelection();
+              selectCard(hand.indexOf(maxCard));
+              humanPlay();
+              return;
+          } else {
+              const candidates = findCandidates(type);
+              if(candidates.length > 0) {
+                  clearSelection();
+                  const cards = candidates[0];
+                  cards.forEach(c => {
+                      const idx = hand.findIndex(h => h.val === c.val);
+                      if(idx !== -1) selectCard(idx);
+                  });
+                  humanPlay();
+                  return;
+              }
+          }
+      }
+
       let bestPlay = null;
       let minScore = Infinity;
-      
+
       // 單張
-      if(!isRoundActive || lastPlay.count === 1) {
+      if(!isRoundActive || (lastPlay && lastPlay.count === 1)) {
           for(let i = 0; i < hand.length; i++) {
               const result = validatePlay([hand[i]]);
               if(result.valid) {
@@ -1802,24 +1872,23 @@ function aiThink() {
               }
           }
       }
-      
+
       // 對子
-      if(!bestPlay || hand.length >= 2) {
-          for(let i = 0; i < hand.length - 1; i++) {
-              for(let j = i + 1; j < hand.length; j++) {
-                  const result = validatePlay([hand[i], hand[j]]);
-                  if(result.valid) {
-                      if(result.handInfo.score < minScore) {
-                          minScore = result.handInfo.score;
-                          bestPlay = [hand[i], hand[j]];
-                      }
+      if(!bestPlay && hand.length >= 2) {
+          const pairCandidates = findCandidates('pair');
+          pairCandidates.forEach(cards => {
+              const result = validatePlay(cards);
+              if(result.valid) {
+                  if(result.handInfo.score < minScore) {
+                      minScore = result.handInfo.score;
+                      bestPlay = cards;
                   }
               }
-          }
+          });
       }
-      
+
       // 順子
-      if(!bestPlay || hand.length >= 5) {
+      if(!bestPlay && hand.length >= 5) {
           const straightCandidates = findCandidates('straight');
           straightCandidates.forEach(cards => {
               const result = validatePlay(cards);
@@ -1831,9 +1900,9 @@ function aiThink() {
               }
           });
       }
-      
+
       // 鐵支
-      if(!bestPlay || hand.length >= 5) {
+      if(!bestPlay && hand.length >= 5) {
           const fourCandidates = findCandidates('fourkind');
           fourCandidates.forEach(cards => {
               const result = validatePlay(cards);
@@ -1845,9 +1914,9 @@ function aiThink() {
               }
           });
       }
-      
+
       // 葫芦
-      if(!bestPlay || hand.length >= 5) {
+      if(!bestPlay && hand.length >= 5) {
           const fullCandidates = findCandidates('fullhouse');
           fullCandidates.forEach(cards => {
               const result = validatePlay(cards);
@@ -1859,9 +1928,9 @@ function aiThink() {
               }
           });
       }
-      
+
       // 同花順
-      if(!bestPlay || hand.length >= 5) {
+      if(!bestPlay && hand.length >= 5) {
           const sfCandidates = findCandidates('straightflush');
           sfCandidates.forEach(cards => {
               const result = validatePlay(cards);
@@ -1873,20 +1942,29 @@ function aiThink() {
               }
           });
       }
-      
+
       if(bestPlay) {
-          // 選中這些牌
+          clearSelection();
           bestPlay.forEach(card => {
-              const idx = players[0].hand.findIndex(c => c.val === card.val);
-              if(idx !== -1) {
-                  selectCard(idx);
-              }
+              const idx = hand.findIndex(c => c.val === card.val);
+              if(idx !== -1) selectCard(idx);
           });
           humanPlay();
       } else {
-          showMsg("無法出牌");
+          clearSelection();
+          if(isRoundActive) {
+              executePass(0);
+          } else {
+              humanPlay();
+          }
       }
   }
+
+  function humanPlayPass() {
+      if(!isRoundActive) return;
+      executePass(0);
+  }
+
   
   // ================= AI 學習系統 =================
   let aiLearningData = {
